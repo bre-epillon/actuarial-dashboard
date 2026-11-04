@@ -1,0 +1,24 @@
+# Generated datasets and exports (built by `python recon.py build`) - never commit
+data/
+
+# Raw actuarial / finance workbooks - confidential, never commit
+inputs/
+*.xlsx
+*.xlsm
+*.xlsb
+~$*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editors / OS / tooling
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.claude/worktrees/
+.claude/settings.local.json
+.claude/launch.json
