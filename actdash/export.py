@@ -1,4 +1,5 @@
-"""Write the build outputs: CSV extracts for the CLI and the data bundle for dashboard.html."""
+"""Write the build outputs: CSV extracts for the CLI and the data bundles of the two browser tools
+(reconciliation.html -> recon_data.js, explorer.html -> explorer_data.js)."""
 
 from __future__ import annotations
 
@@ -14,7 +15,8 @@ from .loaders import _iso
 from .mapping import ACTUARIAL_LABELS
 from .model import ALL_RECON, Model, act_col, delta_col, fin_col
 
-DATA_JS = "dashboard_data.js"
+RECON_JS = "recon_data.js"
+EXPLORER_JS = "explorer_data.js"
 META_JSON = "meta.json"
 POLICY_CSV = "recon_policy_level.csv"
 SUMMARY_CSV = "recon_summary.csv"
@@ -37,8 +39,10 @@ def write_outputs(model: Model, out: Path) -> dict[str, Path]:
     model.claims.to_csv(paths["claims"], index=False, float_format="%.2f")
     paths["meta"] = out / META_JSON
     paths["meta"].write_text(json.dumps(meta(model), indent=2), encoding="utf-8")
-    paths["bundle"] = out / DATA_JS
-    write_bundle(model, paths["bundle"])
+    paths["recon_bundle"] = out / RECON_JS
+    write_recon_bundle(model, paths["recon_bundle"])
+    paths["explorer_bundle"] = out / EXPLORER_JS
+    write_explorer_bundle(model, paths["explorer_bundle"])
     return paths
 
 
@@ -121,52 +125,67 @@ def ref(name: str, series: pd.Series, keys: pd.Index) -> dict:
     return {"name": name, "kind": "ref", "table": "policies", "values": idx.tolist()}
 
 
-# ---------------------------------------------------------------- bundle
-def write_bundle(model: Model, path: Path) -> None:
-    p = model.policies
-    pol_cols = [
+# ---------------------------------------------------------------- bundles
+ACT_ATTRS = ["Reserving LOB", "LOB", "Branch", "Status", "UWQ", "Inception", "Duration (m)", "Act Comment"]
+FIN_ATTRS = [
+    "Office", "Fin Line of Business", "Policy Type", "Prop Indicator", "Underwriter", "Reinsured",
+    "Reinsured Country", "Risk Country", "Broker", "Broker Location", "Placement", "Currency",
+    "Profit Center", "Cost Center", "In Force", "Risk Description", "Original Insured",
+    "Policy Valid From", "Policy Valid To",
+]
+# Finance values the explorer keeps as reference lines on its charts (premium booked / pipeline, paid / outstanding)
+EXPLORER_FIN = ("GPrmB", "Pipeline", "GClmP", "GClmO", "Incurred")
+
+
+def _policy_dims(p: pd.DataFrame) -> list[dict]:
+    cols = [
         dim("Policy", p["Policy"], "Key"),
         dim("Source", p["Source"], "Reconciliation"),
         dim("UWY", p["UWY"], "Actuarial"),
     ]
-    act_attrs = ["Reserving LOB", "LOB", "Branch", "Status", "UWQ", "Inception", "Duration (m)", "Act Comment"]
-    fin_attrs = [
-        "Office",
-        "Fin Line of Business",
-        "Policy Type",
-        "Prop Indicator",
-        "Underwriter",
-        "Reinsured",
-        "Reinsured Country",
-        "Risk Country",
-        "Broker",
-        "Broker Location",
-        "Placement",
-        "Currency",
-        "Profit Center",
-        "Cost Center",
-        "In Force",
-        "Risk Description",
-        "Original Insured",
-        "Policy Valid From",
-        "Policy Valid To",
-    ]
-    pol_cols += [dim(c, p[c], "Actuarial") for c in act_attrs if c in p]
-    pol_cols += [dim(c, p[c], "Finance") for c in fin_attrs if c in p]
+    cols += [dim(c, p[c], "Actuarial") for c in ACT_ATTRS if c in p]
+    cols += [dim(c, p[c], "Finance") for c in FIN_ATTRS if c in p]
+    return cols
 
+
+def _dump(model: Model, tables: dict, path: Path) -> None:
+    bundle = {"meta": meta(model), "measureLabels": ACTUARIAL_LABELS, "tables": tables}
+    text = json.dumps(bundle, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    path.write_text("window.ACTDASH_DATA=" + text + ";" + chr(10), encoding="utf-8")
+
+
+def write_recon_bundle(model: Model, path: Path) -> None:
+    """Policy level only: Actuarial / Finance / Delta per measure, plus every finance column."""
+    p = model.policies
+    cols = _policy_dims(p)
     for m in ALL_RECON:
-        pol_cols.append(num(act_col(m.key), p[act_col(m.key)], "Actuarial", f"{m.label} · Act"))
-    pol_cols.append(num("GGWP_A", p["GGWP_A"], "Actuarial", "GWP total (GGWP) · Act"))
+        cols.append(num(act_col(m.key), p[act_col(m.key)], "Actuarial", f"{m.label} · Act"))
+    cols.append(num("GGWP_A", p["GGWP_A"], "Actuarial", "GWP total (GGWP) · Act"))
     for m in ALL_RECON:
-        pol_cols.append(num(fin_col(m.key), p[fin_col(m.key)], "Finance", f"{m.label} · Fin"))
+        cols.append(num(fin_col(m.key), p[fin_col(m.key)], "Finance", f"{m.label} · Fin"))
     for m in ALL_RECON:
-        pol_cols.append(num(delta_col(m.key), p[delta_col(m.key)], "Delta", f"{m.label} · Δ"))
-    pol_cols.append(num("Claims_N", p["Claims_N"], "Counts", "# claims"))
-    pol_cols.append(num("OpenClaims_N", p["OpenClaims_N"], "Counts", "# open claims"))
+        cols.append(num(delta_col(m.key), p[delta_col(m.key)], "Delta", f"{m.label} · Δ"))
+    cols.append(num("Claims_N", p["Claims_N"], "Counts", "# claims"))
+    cols.append(num("OpenClaims_N", p["OpenClaims_N"], "Counts", "# open claims"))
     for c in model.finance_amounts:
         s = p["F: " + c]
         if (s.abs() > 0.005).any():
-            pol_cols.append(num("F: " + c, s, "Finance (all columns)", c, src=c))
+            cols.append(num("F: " + c, s, "Finance (all columns)", c, src=c))
+    _dump(model, {"policies": {"n": len(p), "columns": cols}}, path)
+
+
+def write_explorer_bundle(model: Model, path: Path) -> None:
+    """Policies (attributes + actuarial amounts), claims and individual postings."""
+    p = model.policies
+    cols = _policy_dims(p)
+    for m in ALL_RECON:
+        cols.append(num(act_col(m.key), p[act_col(m.key)], "Actuarial", f"{m.label} · Act"))
+    cols.append(num("GGWP_A", p["GGWP_A"], "Actuarial", "GWP total (GGWP) · Act"))
+    for m in ALL_RECON:
+        if m.key in EXPLORER_FIN:
+            cols.append(num(fin_col(m.key), p[fin_col(m.key)], "Finance", f"{m.label} · Fin"))
+    cols.append(num("Claims_N", p["Claims_N"], "Counts", "# claims"))
+    cols.append(num("OpenClaims_N", p["OpenClaims_N"], "Counts", "# open claims"))
 
     keys = pd.Index(p["Policy"])
     c = model.claims
@@ -205,15 +224,12 @@ def write_bundle(model: Model, path: Path) -> None:
         dim("Claim Type", t["Claim Type"], "Posting") if "Claim Type" in t else None,
         dim("Threshold", t["Threshold"], "Posting") if "Threshold" in t else None,
     ]
-
-    bundle = {
-        "meta": meta(model),
-        "measureLabels": ACTUARIAL_LABELS,
-        "tables": {
-            "policies": {"n": len(p), "columns": pol_cols},
+    _dump(
+        model,
+        {
+            "policies": {"n": len(p), "columns": cols},
             "claims": {"n": len(c), "columns": [x for x in claim_cols if x]},
             "postings": {"n": len(t), "columns": [x for x in post_cols if x]},
         },
-    }
-    text = json.dumps(bundle, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-    path.write_text("window.ACTDASH_DATA=" + text + ";\n", encoding="utf-8")
+        path,
+    )
