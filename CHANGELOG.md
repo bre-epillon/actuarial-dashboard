@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Navigation**: browser Back / Forward now step through the views you visited (scope, policy, filters); the address bar holds the current scope, so a view can be bookmarked or shared; a *Back to previous view* button on the Overview. A bare `explorer.html` always opens on the whole portfolio.
+
 ## v0.1.0 - 2026-11-06
 
 First shared version.

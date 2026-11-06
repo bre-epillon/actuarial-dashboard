@@ -31,13 +31,64 @@ const S = {
   recon: { focus: 'any', byDim: 'Reserving LOB', showAll: false, sort: null },
   ov: { axis: 'month', cum: true },
 };
-const hist = [];
 
 function snapshot() { return clone({ tab: S.tab, filters: S.filters, num: S.num, search: S.search, views: S.views, recon: S.recon, ov: S.ov }); }
-function pushHist() { hist.push(snapshot()); if (hist.length > 60) hist.shift(); }
-function back() { const s = hist.pop(); if (!s) return; Object.assign(S, s); renderAll(); }
+
+/* ------------------------------------------------- history + shareable URL
+   Every navigation step (pushHist, called before a change) becomes a browser history entry that
+   carries the full view state, and the current scope is mirrored in the URL hash, e.g.
+   explorer.html#f.Reinsured=ACHEEL+SAS&tab=overview. So the browser's Back / Forward buttons, the
+   in-page Back button and copy-pasting the address all work. */
+let hi = 0;   // index of the current history entry (0 = first page of this visit)
+function encodeHash(sn) {
+  const p = new URLSearchParams();
+  if (sn.tab && sn.tab !== APP.tabs[0][0]) p.set('tab', sn.tab);
+  for (const [name, f] of Object.entries(sn.filters || {})) {
+    if (!f.vals.length) continue;
+    const one = f.vals.length === 1 && typeof f.vals[0] === 'string' && !f.vals[0].startsWith('[');
+    p.set((f.not ? 'x.' : 'f.') + name, one ? f.vals[0] : JSON.stringify(f.vals));
+  }
+  if (sn.search && sn.search.trim()) p.set('q', sn.search);
+  if (sn.num && sn.num.length) p.set('num', JSON.stringify(sn.num));
+  if (sn.ov && sn.ov.axis && sn.ov.axis !== 'month') p.set('axis', sn.ov.axis);
+  if (sn.ov && sn.ov.cum === false) p.set('cum', '0');
+  return p.toString();
+}
+function decodeHash(h) {
+  h = (h || '').replace(/^#/, '');
+  if (!h.includes('=')) return null;
+  const p = new URLSearchParams(h), filters = {};
+  for (const [k, v] of p) {
+    const m = /^(f|x)\.(.+)$/.exec(k), legacy = { policy: 'Policy', broker: 'Broker', reinsured: 'Reinsured' }[k];
+    if (!m && !legacy) continue;
+    let vals = [v];
+    if (v.startsWith('[')) { try { const a = JSON.parse(v); if (Array.isArray(a)) vals = a; } catch (e) { /* plain text */ } }
+    filters[m ? m[2] : legacy] = { vals, not: m ? m[1] === 'x' : false };
+  }
+  let num = []; try { num = JSON.parse(p.get('num') || '[]'); } catch (e) { /* ignore */ }
+  const tab = APP.tabs.some(([k]) => k === p.get('tab')) ? p.get('tab') : APP.tabs[0][0];
+  return { tab, filters, num: Array.isArray(num) ? num : [], search: p.get('q') || '', ov: { axis: p.get('axis') || 'month', cum: p.get('cum') !== '0' } };
+}
+const urlFor = (sn) => { const h = encodeHash(sn); return location.pathname + location.search + (h ? '#' + h : ''); };
+function putState(replace) {
+  const sn = snapshot();
+  try { history[replace ? 'replaceState' : 'pushState']({ ...sn, i: hi }, '', urlFor(sn)); } catch (e) { /* e.g. history API unavailable */ }
+}
+let urlTimer = 0;
+function syncUrl() { clearTimeout(urlTimer); urlTimer = setTimeout(() => putState(true), 120); }
+function pushHist() { clearTimeout(urlTimer); putState(true); hi++; putState(false); }
+function back() { if (hi > 0) history.back(); }
+window.addEventListener('popstate', (e) => {
+  clearTimeout(urlTimer);
+  const st = e.state;
+  if (st && st.filters !== undefined) { const { i, ...rest } = st; hi = i || 0; Object.assign(S, clone(rest)); }
+  else { const d = decodeHash(location.hash); if (d) Object.assign(S, d); }
+  if (!APP.tabs.some(([k]) => k === S.tab)) S.tab = APP.tabs[0][0];
+  renderAll();
+});
 let saveTimer = 0;
 function save() {
+  syncUrl();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     try { localStorage.setItem(APP.lsKey, JSON.stringify({ ...snapshot(), units: S.units, tol: S.tol, sidebar: S.sidebar, open: S.open, built: META.built_at })); } catch (e) { /* storage unavailable */ }
@@ -47,7 +98,8 @@ function load() {
   try {
     const s = JSON.parse(localStorage.getItem(APP.lsKey) || 'null');
     if (!s) return;
-    for (const k of ['tab', 'units', 'tol', 'sidebar', 'filters', 'num', 'search', 'views', 'recon', 'ov', 'open']) if (s[k] !== undefined) S[k] = s[k];
+    // Scope (tab, filters, search) lives in the URL; only layout preferences are remembered here.
+    for (const k of ['units', 'tol', 'sidebar', 'views', 'recon', 'ov', 'open']) if (s[k] !== undefined) S[k] = s[k];
   } catch (e) { /* ignore */ }
 }
 function view(t) {
@@ -664,7 +716,7 @@ function renderTop() {
   $('#tabs').innerHTML = APP.tabs.map(([k, l]) => `<button class="tab" role="tab" aria-selected="${S.tab === k}" data-tab="${k}">${l}</button>`).join('');
   $('#units').value = S.units;
   if ($('#tol')) $('#tol').value = S.tol;
-  $('#back').disabled = !hist.length;
+  $('#back').disabled = hi <= 0;
   $('#layout').classList.toggle('nosb', !S.sidebar);
   if (APP.onTop) APP.onTop();
 }
@@ -697,6 +749,9 @@ python recon.py build</pre>
   decode(window.ACTDASH_DATA);
   S.tab = APP.tabs[0][0];
   load();
+  const fromUrl = decodeHash(location.hash);
+  if (fromUrl) Object.assign(S, fromUrl);
+  hi = (history.state && history.state.i) || 0;
   if (!APP.tabs.some(([k]) => k === S.tab)) S.tab = APP.tabs[0][0];
   if (APP.onLoad) APP.onLoad();
   app.innerHTML = `
@@ -708,7 +763,7 @@ python recon.py build</pre>
       <span class="spacer"></span>
       ${APP.showTol ? '<label class="ctl" title="Absolute delta above which a policy counts as a discrepancy">Tolerance <input id="tol" type="number" min="0" step="any"></label>' : ''}
       <label class="ctl">Units <select id="units"><option value="">USD</option><option value="k">USD k</option><option value="m">USD m</option></select></label>
-      <button class="iconbtn" id="back" title="Undo last change (Alt+←)">↶ Back</button>
+      <button class="iconbtn" id="back" title="Previous view (Alt+←) - same as the browser Back button">↶ Back</button>
       <a class="iconbtn navlink" href="${esc(APP.otherTool.href)}" title="${esc(APP.otherTool.title)}">${esc(APP.otherTool.label)} ↗</a>
     </header>
     <div class="layout" id="layout"><aside id="sb"></aside><main id="main" class="page"></main></div>
