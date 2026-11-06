@@ -21,7 +21,7 @@ APP = {
   onTop: () => { const q = $('#q'); if (q && document.activeElement !== q && q.value !== S.search) q.value = S.search; },
   onLoad: () => {},
   onEscape: () => hideSugg(),
-  afterBoot: () => { wireOmnibox(); applyHash(); window.addEventListener('hashchange', () => { applyHash(); renderAll(); }); },
+  afterBoot: () => { wireOmnibox(); },
   presets: {
     policies: [
       { name: 'Policy list', view: { mode: 'list', listCols: ['Policy', 'UWY', 'Reserving LOB', 'Branch', 'Office', 'Policy Type', 'Reinsured', 'Broker'], measures: ['GGWP_A', 'GPrmB_A', 'Incurred_A', 'Claims_N'] } },
@@ -62,17 +62,6 @@ function openPolicy(row, t, i) {
   if (t && t.name !== 'policies') { const c = t.cols.get('Claim'); const v = c && c.dict[c.codes[i]]; if (v !== null && v !== undefined) f.Claim = eq(v); }
   jump(f);
 }
-function applyHash() {
-  const h = decodeURIComponent((location.hash || '').replace(/^#/, ''));
-  const m = /^(policy|broker|reinsured|q)=(.*)$/.exec(h);
-  if (!m || !m[2]) return;
-  S.filters = {}; S.num = []; S.search = ''; S.tab = 'overview';
-  if (m[1] === 'policy') S.filters.Policy = eq(m[2]);
-  else if (m[1] === 'broker') S.filters.Broker = eq(m[2]);
-  else if (m[1] === 'reinsured') S.filters.Reinsured = eq(m[2]);
-  else S.search = m[2];
-}
-
 /* -------------------------------------------------------------- omnibox */
 let sugg = { items: [], hl: -1 };
 function hideSugg() { const el = $('#sugg'); if (el) el.hidden = true; sugg = { items: [], hl: -1 }; }
@@ -299,6 +288,7 @@ function overview(page) {
   } else {
     head = `<h2>${chips.length ? 'Scope' : 'Whole portfolio'}<span class="muted" style="font-weight:400">${sc.n.toLocaleString()} of ${P.n.toLocaleString()} policies · ${cIdx.length.toLocaleString()} claims</span>${chips.length ? '<span class="r"><button class="iconbtn" id="clr">Clear scope</button></span>' : ''}</h2>`;
   }
+  const crumb = hi > 0 ? '<div style="margin:-2px 0 8px"><button class="iconbtn" id="ovback" title="Back to the previous view (Alt+←)">← Back to previous view</button></div>' : '';
   const chipRow = chips.length ? `<div class="chips" style="margin-top:8px">${chips.join('')}</div>` : '';
 
   const kpi = (label, v, fin, tip) => `<div class="kpi" title="${esc(tip || '')}"><div class="kl">${label}</div><div class="kv0">${amt(v)}</div><div class="kf">${fin === null ? '&nbsp;' : 'Finance ' + amt(fin)}</div></div>`;
@@ -338,7 +328,7 @@ function overview(page) {
     </tbody></table></div></section>`;
 
   page.innerHTML = `
-    <section class="card">${head}${chipRow}</section>
+    <section class="card">${crumb}${head}${chipRow}</section>
     ${kpis}
     ${controls}
     <div class="charts">
@@ -368,6 +358,7 @@ function overview(page) {
   page.querySelectorAll('[data-rmf]').forEach((b) => b.onclick = () => { pushHist(); delete S.filters[b.dataset.rmf]; update(); });
   page.querySelectorAll('[data-rmn]').forEach((b) => b.onclick = () => { pushHist(); S.num.splice(+b.dataset.rmn, 1); update(); });
   const rs = page.querySelector('[data-rms]'); if (rs) rs.onclick = () => { pushHist(); S.search = ''; const q = $('#q'); if (q) q.value = ''; update(); };
+  const ob = $('#ovback'); if (ob) ob.onclick = back;
   const clr = $('#clr'); if (clr) clr.onclick = () => { pushHist(); S.filters = {}; S.num = []; S.search = ''; const q = $('#q'); if (q) q.value = ''; update(); };
   page.querySelectorAll('[data-pol]').forEach((tr) => tr.onclick = () => openPolicy(+tr.dataset.pol));
   page.querySelectorAll('[data-clm]').forEach((tr) => tr.onclick = () => { const i = +tr.dataset.clm; openPolicy(C.pidx[i], C, i); });

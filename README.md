@@ -115,7 +115,7 @@ Open it in Edge or Chrome (it loads `data/explorer_data.js`).
 * Left panel: filters on any dimension with live counts and amount filters; they apply
   to every tab. `CSV` downloads the current table; `Back` (Alt+Left) undoes the last
   change; the layout is remembered in the browser.
-* Deep links: `explorer.html#policy=<ref>`, `#broker=<name>`, `#reinsured=<name>`, `#q=<text>`.
+* **Back / Forward and links**: every step (picking an entity, opening a policy, changing a filter) is a browser history entry, so the browser's Back and Forward buttons, `Alt+Left` and the in-page *Back* button all return to the previous view. The address bar always reflects the current scope (e.g. `explorer.html#f.Reinsured=ACHEEL+SAS`): copy it to share a view, or bookmark it. Short forms `#policy=<ref>`, `#broker=<name>`, `#reinsured=<name>`, `#q=<text>` also work. Both tools behave this way.
 
 ## 4. Command line
 
