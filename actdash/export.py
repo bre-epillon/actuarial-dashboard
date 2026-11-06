@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from . import __version__
 from .loaders import _iso
 from .mapping import ACTUARIAL_LABELS
 from .model import ALL_RECON, Model, act_col, delta_col, fin_col
@@ -48,6 +49,7 @@ def write_outputs(model: Model, out: Path) -> dict[str, Path]:
 
 def meta(model: Model) -> dict:
     return {
+        "version": __version__,
         "built_at": dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
         "actuarial": model.actuarial.describe(),
         "finance": model.finance.describe(),

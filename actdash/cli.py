@@ -17,10 +17,12 @@ import json
 import logging
 import sys
 import time
+import warnings
 from pathlib import Path
 
 import pandas as pd
 
+from . import __version__
 from .export import CLAIMS_CSV, META_JSON, POLICY_CSV, write_outputs
 from .loaders import load_actuarial, load_finance
 from .mapping import MEASURE_ALIASES
@@ -97,6 +99,15 @@ def cmd_build(args) -> None:
     fin_spec = args.finance or cfg.get("finance")
     if not act_spec or not fin_spec:
         raise SystemExit("Specify --actuarial and --finance (or set them in sources.json)")
+    for label, spec in (("actuarial", act_spec), ("finance", fin_spec)):
+        path = Path(spec.split("#")[0])
+        path = path if path.is_absolute() else ROOT / path
+        if not path.exists():
+            raise SystemExit(
+                f"The {label} workbook was not found: {path}\n"
+                "Copy it into the inputs folder and check the file names in sources.json "
+                '(or pass --actuarial / --finance "folder/file.xlsx#Sheet").'
+            )
     t = time.time()
     act, act_src = load_actuarial(str(ROOT / act_spec) if not Path(act_spec.split("#")[0]).is_absolute() else act_spec)
     fin, fin_src, amounts = load_finance(str(ROOT / fin_spec) if not Path(fin_spec.split("#")[0]).is_absolute() else fin_spec)
@@ -229,7 +240,9 @@ def main(argv: list[str] | None = None) -> None:
     except Exception:
         pass
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)
     ap = argparse.ArgumentParser(prog="recon.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     ap.add_argument("--data", default=str(ROOT / "data"), help="folder with the built datasets (default: data/)")
     sub = ap.add_subparsers(dest="cmd", required=True)
 

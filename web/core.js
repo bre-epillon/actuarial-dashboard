@@ -702,7 +702,7 @@ python recon.py build</pre>
   app.innerHTML = `
     <header class="top">
       <button class="iconbtn" id="tsb" title="Toggle filters panel">☰</button>
-      <div class="brand">${esc(APP.title)}<small>${esc(META.actuarial.as_of || '')}</small></div>
+      <div class="brand">${esc(APP.title)}<small title="Data as of · tool version · built">${esc(META.actuarial.as_of || '')}${META.version ? ' · v' + esc(META.version) : ''}</small></div>
       <nav class="tabs" id="tabs" role="tablist"></nav>
       ${APP.topHtml ? APP.topHtml() : ''}
       <span class="spacer"></span>

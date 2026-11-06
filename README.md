@@ -14,10 +14,23 @@ pivoting of the reserving inputs.
 
 Both are single-folder static pages (no install, no internet needed).
 
+## Quick start (Windows, Python 3.10+ installed)
+
+1. Download the zip of the latest [release](https://github.com/bre-epillon/actuarial-dashboard/releases) and unzip it anywhere (or `git clone` the repo).
+2. Copy the two Excel workbooks into the `inputs\` folder and make sure the file names in
+   `sources.json` match them (the actuarial `Input Data` sheet, the finance production report).
+3. Double-click **`build.bat`**. The first run creates a private Python environment and installs
+   the dependencies; every run then builds the data (about 30 seconds) and opens the Explorer.
+4. Next time, to refresh the data after new workbooks, double-click `build.bat` again. To just
+   look at the last build, open `explorer.html` or `reconciliation.html` (Edge or Chrome).
+
+If the build stops with a message, it tells you what is missing (usually a file name in `sources.json`).
+Nothing leaves your machine: the pages are static and read the files in `data/`, which is never committed.
+
 Data never goes into git: the Excel inputs (`inputs/`, `*.xlsx`) and everything the
 build produces (`data/`) are ignored.
 
-## Setup
+## Manual setup (macOS / Linux / without build.bat)
 
 ```bash
 pip install -r requirements.txt
@@ -150,6 +163,7 @@ actdash/loaders.py  Excel readers (sheet / header auto-detection)
 actdash/model.py    policy, claim and posting tables + reconciliation
 actdash/export.py   CSV outputs and the two data bundles
 actdash/cli.py      commands
+build.bat           one-click build (Windows)
 reconciliation.html browser tool 1: actuarial vs finance
 explorer.html       browser tool 2: search, charts, pivots
 web/core.js|css     shared code: data decoding, filters, aggregation, grid, pivot
