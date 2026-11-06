@@ -6,14 +6,31 @@ pivoting of the reserving inputs.
 * **`recon.py`** - reads the two Excel sources, rebuilds the policy-level
   reconciliation (same logic as the `Policy level` sheet) and lets you query the
   discrepancies from the terminal.
-* **`dashboard.html`** - single-file browser app (no install, no internet needed):
-  reconciliation dashboard + fast filter / group-by / pivot over policies, claims
-  and individual postings.
+* **`reconciliation.html`** - browser tool 1: actuarial vs finance. Discrepancies by
+  measure, dimension and policy.
+* **`explorer.html`** - browser tool 2: search any policy, claim, broker or reinsured and
+  see premium booking and claim development over time; pivot over policies, claims
+  and postings.
+
+Both are single-folder static pages (no install, no internet needed).
+
+## Quick start (Windows, Python 3.10+ installed)
+
+1. Download the zip of the latest [release](https://github.com/bre-epillon/actuarial-dashboard/releases) and unzip it anywhere (or `git clone` the repo).
+2. Copy the two Excel workbooks into the `inputs\` folder and make sure the file names in
+   `sources.json` match them (the actuarial `Input Data` sheet, the finance production report).
+3. Double-click **`build.bat`**. The first run creates a private Python environment and installs
+   the dependencies; every run then builds the data (about 30 seconds) and opens the Explorer.
+4. Next time, to refresh the data after new workbooks, double-click `build.bat` again. To just
+   look at the last build, open `explorer.html` or `reconciliation.html` (Edge or Chrome).
+
+If the build stops with a message, it tells you what is missing (usually a file name in `sources.json`).
+Nothing leaves your machine: the pages are static and read the files in `data/`, which is never committed.
 
 Data never goes into git: the Excel inputs (`inputs/`, `*.xlsx`) and everything the
 build produces (`data/`) are ignored.
 
-## Setup
+## Manual setup (macOS / Linux / without build.bat)
 
 ```bash
 pip install -r requirements.txt
@@ -49,38 +66,58 @@ Outputs in `data/` (~25 s for a full quarter):
 
 | File | Content |
 |---|---|
-| `dashboard_data.js` | data bundle loaded by `dashboard.html` |
+| `recon_data.js` | data of `reconciliation.html`: policies, Actuarial / Finance / Delta, all finance columns |
+| `explorer_data.js` | data of `explorer.html`: policies, claims, individual postings |
 | `recon_policy_level.csv` | one row per policy: attributes, Actuarial / Finance / Delta per measure, all finance columns |
 | `recon_summary.csv` | the summary table of the Excel `Reconciliation` sheet |
 | `claims.csv` | one row per (policy, claim): paid, case reserves, incurred, type, status |
 | `meta.json` | sources, cut-off dates, warnings, measure mapping |
 
-## 2. Dashboard
+## 2. Reconciliation tool (`reconciliation.html`)
 
-Open `dashboard.html` in Edge or Chrome (double-click works; it loads
-`data/dashboard_data.js` next to it).
+Open it in Edge or Chrome (double-click works; it loads `data/recon_data.js`).
 
 * **Reconciliation** - the Excel summary (Actuarial, Finance, Delta per measure),
   Delta by any dimension, coverage (policies in one source only) and the list of
   discrepant policies, sorted by |Delta|. Click a measure to focus on it; set the
   tolerance in the top bar.
-* **Policies / Claims / Postings** - pivot-style explorer:
-  * *Aggregate*: group by any dimensions, optionally spread one dimension
-    across columns (with a cumulative option for triangles), choose values
-    (amounts, Act/Fin/Delta, counts, distinct policies / claims).
-  * *List rows*: plain table of the filtered rows.
-  * Click a group value to drill down, click a policy anywhere to open its card
-    (reconciliation, attributes from both sources, claims, postings by period,
-    non-zero finance columns).
-  * Ready-made views (`Views`): reconciliation by reserving LOB, paid / incurred /
-    GWP triangles (UWY x dev year), large claims, open claims...
-* Left panel: free-text search (policy, claim, reinsured, broker), filters on any
-  dimension with live counts (include or exclude), amount filters
-  (e.g. `|Case Reserves Delta| > 1000`). Filters apply to every tab.
-* `CSV` downloads the current table; `Back` (Alt+Left) undoes the last change;
-  `/` jumps to search. The layout is remembered in the browser.
+* **Policies** - pivot over the policy level with Actuarial / Finance / Delta values:
+  group by any dimensions, spread one across columns, filter like in Excel but fast.
+  Ready-made views (`Views`): reconciliation by reserving LOB or broker, incurred by UWY...
+* A policy opens a card (reconciliation per measure, attributes from both sources,
+  every non-zero finance column) with a link to the same policy in the Explorer.
+* Left panel: free-text search, filters with live counts (include or exclude) and
+  amount filters (e.g. `|Case Reserves Delta| > 1000`).
 
-## 3. Command line
+## 3. Explorer (`explorer.html`)
+
+Open it in Edge or Chrome (it loads `data/explorer_data.js`).
+
+* **Search bar (top, `/` to focus)** - type any string: matching policies, claims,
+  brokers, reinsureds and original insureds appear immediately; pick one (click, or
+  arrows + Enter) to scope everything to it. The tables are also filtered live by the text.
+* **Overview** - for the current scope (whole portfolio, a policy, a claim, a broker...):
+  * KPIs: written, booked and pipeline premium, paid, case reserves, incurred, each with the finance figure.
+  * **Premium booking over time**: written (`GGWP`), booked (`GPrmB`) and pipeline
+    (`GGWP - GPrmB - GPrmR`) from the actuarial postings, against the finance
+    *booked*, *pipeline* and *booked + pipeline* totals (dashed lines).
+  * **Claim development over time**: incurred, paid (`GClmP`) and case reserves
+    (`GClmO`) against the finance paid / outstanding totals.
+  * Time axis: month, quarter, year or development year since UWY; cumulative on/off;
+    hover for values; `Table` shows the numbers behind each chart.
+  * Largest policies and claims in scope; click one to scope to it.
+  * Losses are shown as positive amounts here; the finance file has no time dimension, so it is drawn as totals.
+* **Policies / Claims / Postings** - pivot-style explorer: *Aggregate* (group by any
+  dimensions, optionally spread one across columns with a cumulative option for
+  triangles) or *List rows*; click a group to drill down, a policy or claim to open it in
+  the Overview. Ready-made views (`Views`): paid / incurred / GWP triangles, broker
+  league table, large claims, open claims...
+* Left panel: filters on any dimension with live counts and amount filters; they apply
+  to every tab. `CSV` downloads the current table; `Back` (Alt+Left) undoes the last
+  change; the layout is remembered in the browser.
+* Deep links: `explorer.html#policy=<ref>`, `#broker=<name>`, `#reinsured=<name>`, `#q=<text>`.
+
+## 4. Command line
 
 ```bash
 python recon.py summary                       # the Excel Reconciliation table
@@ -124,8 +161,14 @@ recon.py            CLI entry point
 actdash/mapping.py  measure definitions and finance column mapping
 actdash/loaders.py  Excel readers (sheet / header auto-detection)
 actdash/model.py    policy, claim and posting tables + reconciliation
-actdash/export.py   CSV outputs and the dashboard data bundle
+actdash/export.py   CSV outputs and the two data bundles
 actdash/cli.py      commands
-dashboard.html      the browser app
+build.bat           one-click build (Windows)
+reconciliation.html browser tool 1: actuarial vs finance
+explorer.html       browser tool 2: search, charts, pivots
+web/core.js|css     shared code: data decoding, filters, aggregation, grid, pivot
+web/recon.js        reconciliation tool
+web/explorer.js     explorer tool (search, overview)
+web/charts.js       line chart used by the explorer
 sources.json        default input files
 ```
