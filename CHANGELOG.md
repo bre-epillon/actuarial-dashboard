@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **GGWP dashboard** (`ggwp.html`, started with `ggwp.bat`): written premium before / after commissions by underwriting year, month and reserving class; always loads the most recent CSV of `inputs/ggwp-pyramid` and refreshes by itself.
+- `serve.py`: small local server (standard library only) used by the GGWP dashboard.
 - **Navigation**: browser Back / Forward now step through the views you visited (scope, policy, filters); the address bar holds the current scope, so a view can be bookmarked or shared; a *Back to previous view* button on the Overview. A bare `explorer.html` always opens on the whole portfolio.
 
 ## v0.1.0 - 2026-11-06

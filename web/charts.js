@@ -85,3 +85,63 @@ function lineChart(host, spec) {
   }
   draw();
 }
+
+/* ---------------------------------------------------------------------------
+   Grouped vertical bars (one group per category), same look and hover as lineChart.
+   spec = { cats: [label], xTitle, series: [{ name, color, vals }], fmt(v), ariaLabel, empty }
+   --------------------------------------------------------------------------- */
+function barChart(host, spec) {
+  host._spec = spec;
+  host.classList.add('chart');
+  const draw = () => {
+    const sp = host._spec, n = sp.cats.length, mode = host._mode || 'chart', k = sp.series.length;
+    if (!n) { host.innerHTML = `<div class="empty">${sp.empty || 'No data in scope.'}</div>`; return; }
+    const legend = `<div class="legend lg-row">${sp.series.map((s) => `<span class="lg"><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join('')}</div>`;
+    if (mode === 'table') {
+      host.innerHTML = legend + `<div class="scrollbox" style="max-height:300px"><table class="t"><thead><tr><th>${esc(sp.xTitle || '')}</th>${sp.series.map((s) => `<th class="n">${esc(s.name)}</th>`).join('')}</tr></thead><tbody>
+        ${sp.cats.map((x, i) => `<tr><td>${esc(x)}</td>${sp.series.map((s) => `<td class="n">${sp.fmt(s.vals[i])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+      return;
+    }
+    const W = Math.max(300, host.clientWidth || 640), H = 280, m = { l: 52, r: 10, t: 10, b: 30 }, pw = W - m.l - m.r, ph = H - m.t - m.b;
+    host._w = host.clientWidth;
+    let lo = 0, hi = 0;
+    for (const s of sp.series) for (const v of s.vals) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    const ticks = niceTicks(lo, hi, 5), y0 = ticks[0], y1 = ticks[ticks.length - 1];
+    const Y = (v) => m.t + ph * (1 - (v - y0) / (y1 - y0 || 1)), yz = Y(0);
+    const gw = pw / n, bw = Math.max(3, Math.min(26, (gw * 0.78 - (k - 1) * 2) / k)), groupW = k * bw + (k - 1) * 2;
+    let svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(sp.ariaLabel || '')}"><rect class="band" x="0" y="${m.t}" width="${gw}" height="${ph}" style="display:none"/>`;
+    for (const t of ticks) svg += `<line class="${t === 0 ? 'zero' : 'grid'}" x1="${m.l}" x2="${m.l + pw}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}"/><text class="ax" x="${m.l - 8}" y="${(Y(t) + 4).toFixed(1)}" text-anchor="end">${shortNum(t)}</text>`;
+    const step = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(pw / 46))));
+    for (let i = 0; i < n; i += step) svg += `<text class="ax" x="${(m.l + gw * (i + 0.5)).toFixed(1)}" y="${H - 9}" text-anchor="middle">${esc(sp.cats[i])}</text>`;
+    // bars: 4px rounded data end, anchored to the baseline
+    sp.series.forEach((s, j) => s.vals.forEach((v, i) => {
+      if (!v) return;
+      const x = m.l + gw * i + (gw - groupW) / 2 + j * (bw + 2), y = Y(v), r = Math.min(4, bw / 2, Math.abs(yz - y));
+      const d = v >= 0
+        ? `M${x.toFixed(1)} ${yz.toFixed(1)}V${(y + r).toFixed(1)}Q${x.toFixed(1)} ${y.toFixed(1)} ${(x + r).toFixed(1)} ${y.toFixed(1)}H${(x + bw - r).toFixed(1)}Q${(x + bw).toFixed(1)} ${y.toFixed(1)} ${(x + bw).toFixed(1)} ${(y + r).toFixed(1)}V${yz.toFixed(1)}Z`
+        : `M${x.toFixed(1)} ${yz.toFixed(1)}V${(y - r).toFixed(1)}Q${x.toFixed(1)} ${y.toFixed(1)} ${(x + r).toFixed(1)} ${y.toFixed(1)}H${(x + bw - r).toFixed(1)}Q${(x + bw).toFixed(1)} ${y.toFixed(1)} ${(x + bw).toFixed(1)} ${(y - r).toFixed(1)}V${yz.toFixed(1)}Z`;
+      svg += `<path d="${d}" fill="${s.color}"/>`;
+    }));
+    svg += `<rect class="hit" x="${m.l}" y="${m.t}" width="${pw}" height="${ph}" fill="transparent"/></svg>`;
+    host.innerHTML = legend + `<div class="cv">${svg}<div class="tip" style="display:none"></div></div>`;
+    const cv = host.querySelector('.cv'), tip = cv.querySelector('.tip'), band = cv.querySelector('.band');
+    const move = (e) => {
+      const r = cv.getBoundingClientRect(), mx = (e.clientX - r.left) * (W / r.width);
+      const i = Math.max(0, Math.min(n - 1, Math.floor((mx - m.l) / gw)));
+      band.style.display = ''; band.setAttribute('x', m.l + gw * i);
+      tip.innerHTML = `<div class="th">${esc(sp.cats[i])}</div>${sp.series.map((s) => `<div><i style="background:${s.color}"></i><span>${esc(s.name)}</span><b>${sp.fmt(s.vals[i])}</b></div>`).join('')}`;
+      tip.style.display = '';
+      const px = ((m.l + gw * (i + 0.5)) / W) * r.width, tw = tip.offsetWidth;
+      tip.style.left = (px + 14 + tw > r.width ? px - 14 - tw : px + 14) + 'px'; tip.style.top = '8px';
+    };
+    const hit = cv.querySelector('.hit');
+    hit.addEventListener('mousemove', move);
+    hit.addEventListener('mouseleave', () => { band.style.display = 'none'; tip.style.display = 'none'; });
+  };
+  host._draw = draw;
+  if (!host._ro && typeof ResizeObserver !== 'undefined') {
+    host._ro = new ResizeObserver(() => { if (host._mode !== 'table' && host._w !== host.clientWidth && host.clientWidth) draw(); });
+    host._ro.observe(host);
+  }
+  draw();
+}

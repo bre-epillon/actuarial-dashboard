@@ -44,3 +44,4 @@ mark { background: var(--accent-weak); color: var(--accent-text); border-radius:
 .tip i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .tip span { flex: 1; color: var(--text-2); }
 .tip b { font-weight: 600; }
+.chart .band { fill: var(--surface-2); }

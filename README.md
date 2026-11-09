@@ -12,7 +12,11 @@ pivoting of the reserving inputs.
   see premium booking and claim development over time; pivot over policies, claims
   and postings.
 
-Both are single-folder static pages (no install, no internet needed).
+* **`ggwp.html`** - browser tool 3: written premium (GGWP before / GNWP after commissions) from the
+  latest CSV extract in `inputs/ggwp-pyramid`, refreshed automatically (section 4).
+
+The tools are static pages (no install, no internet needed); only the GGWP one needs the tiny local
+server started by `ggwp.bat`.
 
 ## Quick start (Windows, Python 3.10+ installed)
 
@@ -117,7 +121,31 @@ Open it in Edge or Chrome (it loads `data/explorer_data.js`).
   change; the layout is remembered in the browser.
 * **Back / Forward and links**: every step (picking an entity, opening a policy, changing a filter) is a browser history entry, so the browser's Back and Forward buttons, `Alt+Left` and the in-page *Back* button all return to the previous view. The address bar always reflects the current scope (e.g. `explorer.html#f.Reinsured=ACHEEL+SAS`): copy it to share a view, or bookmark it. Short forms `#policy=<ref>`, `#broker=<name>`, `#reinsured=<name>`, `#q=<text>` also work. Both tools behave this way.
 
-## 4. Command line
+## 4. Written premium dashboard (`ggwp.html`)
+
+Analyses the database extract of gross-gross written premium (GGWP, before commissions) and
+gross-net written premium (GNWP, after commissions) by underwriting year, underwriting month and
+reserving class.
+
+* Each morning: save the new CSV extract in **`inputs/ggwp-pyramid/`** (file names like
+  `GGWP view <name>_2026-11-09.csv`; any name works) and double-click **`ggwp.bat`**. The dashboard
+  always shows the **most recent** file of the folder (by the date in its name, then by modification
+  time), re-checks the folder every 30 seconds and refreshes by itself when a newer file or a
+  changed file appears. Leave the black window open while you use it.
+* Columns are found by header name (GGWP, GNWP, underwriting month, underwriting year, reserving class),
+  so column order does not matter. If the extract changes shape, the page says which column is missing.
+* Contents: KPIs (GGWP, GNWP, commissions, commission %), written premium by year / quarter / month,
+  a monthly timeline or a year-over-year overlay (seasonality, optionally cumulative), and a pivot
+  (rows and columns among year, class, month, quarter, year-month; GGWP, GNWP, commissions,
+  commission % or % of total; cumulative across columns; heat map; CSV download).
+  Underwriting year x month with GGWP is the premium pyramid. Filters on the left apply to everything.
+* Data notes flag oddities in the extract (class UNKNOWN, GNWP above GGWP, future underwriting years...).
+* Without the server (opening `ggwp.html` directly) use *Load CSV...* to pick a file by hand.
+* The folder can be changed with `"ggwp_dir"` in `sources.json`. `python serve.py` starts the same
+  local server from a terminal (it only listens on your machine and serves the tool pages and
+  `data/`, never `inputs/`).
+
+## 5. Command line
 
 ```bash
 python recon.py summary                       # the Excel Reconciliation table
@@ -164,6 +192,10 @@ actdash/model.py    policy, claim and posting tables + reconciliation
 actdash/export.py   CSV outputs and the two data bundles
 actdash/cli.py      commands
 build.bat           one-click build (Windows)
+ggwp.bat            opens the GGWP dashboard on the latest extract (Windows)
+serve.py            local server (stdlib only), latest-file API
+ggwp.html           browser tool 3: written premium (GGWP / GNWP)
+web/ggwp.js         GGWP dashboard
 reconciliation.html browser tool 1: actuarial vs finance
 explorer.html       browser tool 2: search, charts, pivots
 web/core.js|css     shared code: data decoding, filters, aggregation, grid, pivot
