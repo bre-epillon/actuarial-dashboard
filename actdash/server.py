@@ -1,14 +1,17 @@
-"""Tiny local web server for the browser tools (standard library only, no pandas needed).
+"""Tiny local web server for the browser tools.
 
 * serves the tool pages (`*.html`), `web/` and `data/` - never `inputs/`;
-* `/api/ggwp/latest` and `/api/ggwp` expose the most recent CSV of the GGWP extract folder, so the
-  GGWP page picks up a new file without any build step.
+* `/api/ggwp/latest` and `/api/ggwp` expose the most recent Underwriting Report (Production) workbook of
+  the GGWP folder, so the GGWP page picks up a new file without any build step. The workbook is read
+  with openpyxl and summarised by underwriting year / month / class (our share, USD).
 Binds to 127.0.0.1 only: nothing is reachable from other machines.
 """
 
 from __future__ import annotations
 
+import csv
 import datetime as dt
+import io
 import json
 import re
 import socket
@@ -20,7 +23,8 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_GGWP_DIR = "inputs/ggwp-pyramid"
-DATE_IN_NAME = re.compile(r"(20\d{2})[-_.]?(\d{2})[-_.]?(\d{2})")
+DATE_ISO = re.compile(r"(20\d{2})[-_.]?(\d{2})[-_.]?(\d{2})")  # 2026-11-12, 20261112
+DATE_DMY = re.compile(r"(\d{2})[-_.]?(\d{2})[-_.]?(20\d{2})")  # 12112026, 12-11-2026
 
 
 def ggwp_dir() -> Path:
@@ -35,18 +39,123 @@ def ggwp_dir() -> Path:
     return p if p.is_absolute() else ROOT / p
 
 
-def latest_csv(folder: Path) -> Path | None:
-    """Most recent CSV: by the date written in the file name (2026-11-09), then by modification time."""
-    files = [f for f in folder.glob("*.csv") if f.is_file() and not f.name.startswith("~$")]
-    if not files:
-        return None
+def name_date(name: str) -> str:
+    m = DATE_ISO.search(name)
+    if m:
+        return "".join(m.groups())
+    m = DATE_DMY.search(name)
+    if m:
+        d, mo, y = m.groups()
+        return y + mo + d
+    return ""
 
-    def key(f: Path):
-        m = DATE_IN_NAME.search(f.name)
-        name_date = "".join(m.groups()) if m else ""
-        return (name_date, f.stat().st_mtime)
 
-    return max(files, key=key)
+def latest_file(folder: Path) -> Path | None:
+    """Most recent Underwriting Report workbook (.xlsx): by the date written in the file name, then by
+    modification time. Falls back to the newest .csv (legacy GGWP extract) when there is no workbook."""
+    for pattern in ("*.xlsx", "*.csv"):
+        files = [f for f in folder.glob(pattern) if f.is_file() and not f.name.startswith("~$")]
+        if files:
+            return max(files, key=lambda f: (name_date(f.name), f.stat().st_mtime))
+    return None
+
+
+# ------------------------------------------------------------ Underwriting Report
+COLS = {
+    "ggwp": "Expected GGWP Share (USD)",  # column BV
+    "gnwp": "Expected GNWP Share (USD)",  # column BY
+    "uwy": "UWY",
+    "inc": "Inception Date",
+    "cls": "Class of Business",
+}
+_cache: dict = {}
+
+
+def _month_year(v):
+    if isinstance(v, (dt.datetime, dt.date)):
+        return v.year, v.month
+    if isinstance(v, str):
+        for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%d/%m/%Y", "%m/%d/%Y"):
+            try:
+                d = dt.datetime.strptime(v.strip(), fmt)
+                return d.year, d.month
+            except ValueError:
+                pass
+    return None
+
+
+def read_uw_report(path: Path) -> dict:
+    """Summarise the workbook: sum of expected GGWP / GNWP (our share, USD) by UWY, inception month, class."""
+    st = path.stat()
+    key = (str(path), st.st_mtime_ns, st.st_size)
+    if key in _cache:
+        return _cache[key]
+    from openpyxl import load_workbook  # imported here so the server starts without openpyxl
+
+    wb = load_workbook(io.BytesIO(path.read_bytes()), read_only=True, data_only=True)
+    ws = head = start = None
+    for sh in wb.worksheets:
+        for i, row in enumerate(sh.iter_rows(min_row=1, max_row=10, values_only=True), start=1):
+            names = [str(c).strip() if c is not None else "" for c in row]
+            if all(c in names for c in COLS.values()):
+                ws, head, start = sh, names, i + 1
+                break
+        if ws:
+            break
+    if ws is None:
+        raise ValueError("no sheet has the columns: " + ", ".join(COLS.values()))
+    ix = {k: head.index(v) for k, v in COLS.items()}
+    agg: dict = {}
+    n = skipped = mismatch_n = 0
+    mismatch = 0.0
+    for row in ws.iter_rows(min_row=start, values_only=True):
+        if not row or row[ix["uwy"]] is None:
+            continue
+        n += 1
+        my = _month_year(row[ix["inc"]])
+        try:
+            uwy = int(row[ix["uwy"]])
+        except (TypeError, ValueError):
+            skipped += 1
+            continue
+        if my is None:
+            skipped += 1
+            continue
+        g = float(row[ix["ggwp"]] or 0)
+        gn = float(row[ix["gnwp"]] or 0)
+        cls = str(row[ix["cls"]]).strip() if row[ix["cls"]] is not None else "(blank)"
+        a = agg.setdefault((uwy, my[1], cls), [0.0, 0.0])
+        a[0] += g
+        a[1] += gn
+        if my[0] != uwy:
+            mismatch_n += 1
+            mismatch += g
+    out = io.StringIO()
+    w = csv.writer(out, quoting=csv.QUOTE_ALL)
+    w.writerow([COLS["ggwp"], COLS["gnwp"], "Policy Underwriting Month", "Policy Underwriting Year", COLS["cls"]])
+    for (uwy, m, cls), (g, gn) in sorted(agg.items()):
+        w.writerow([f"{g:.2f}", f"{gn:.2f}", m, uwy, cls])
+    warnings = []
+    if skipped:
+        warnings.append(f"{skipped} policy row(s) without a usable UWY or inception date were left out.")
+    if mismatch_n:
+        warnings.append(
+            f"{mismatch_n} policy row(s) have an inception year different from their UWY "
+            f"(expected GGWP {mismatch:,.0f}): they are shown under their UWY, in their inception month."
+        )
+    res = {
+        "csv": out.getvalue(),
+        "unit": "USD",
+        "policy_rows": n,
+        "warnings": warnings,
+        "note": (
+            "Expected premium, our share (USD): GGWP = Expected GGWP Share (column BV), GNWP = Expected GNWP Share "
+            "(column BY). Underwriting year = UWY, underwriting month = month of the inception date, class = Class of Business."
+        ),
+    }
+    _cache.clear()
+    _cache[key] = res
+    return res
 
 
 def file_info(f: Path) -> dict:
@@ -85,12 +194,20 @@ class Handler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
         if path in ("/api/ggwp/latest", "/api/ggwp"):
             folder = ggwp_dir()
-            f = latest_csv(folder) if folder.exists() else None
+            f = latest_file(folder) if folder.exists() else None
             if f is None:
-                return self._json({"error": f"No .csv file found in {folder}"}, 404)
+                return self._json({"error": f"No Underwriting Report (.xlsx) found in {folder}"}, 404)
             info = file_info(f)
             if path == "/api/ggwp":
-                info["csv"] = f.read_text(encoding="utf-8-sig", errors="replace")
+                try:
+                    if f.suffix.lower() == ".xlsx":
+                        info.update(read_uw_report(f))
+                    else:
+                        info["csv"] = f.read_text(encoding="utf-8-sig", errors="replace")
+                except ImportError:
+                    return self._json({"error": "openpyxl is not installed - run build.bat once (or pip install -r requirements.txt)."}, 500)
+                except Exception as e:  # unreadable file or unexpected layout
+                    return self._json({"error": f"Could not read {f.name}: {e}"}, 500)
             return self._json(info)
         if path == "/":
             self.path = "/explorer.html"
@@ -121,7 +238,7 @@ def serve(port: int = 8770, page: str | None = None) -> None:
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}/"
     print(f"Serving {ROOT.name} at {url}")
-    print(f"GGWP extracts read from: {ggwp_dir()}")
+    print(f"Underwriting Report read from: {ggwp_dir()}")
     print("Leave this window open while you use the tools; close it (or Ctrl+C) to stop.")
     if page:
         threading.Timer(0.6, lambda: webbrowser.open(url + page)).start()

@@ -1,8 +1,10 @@
 'use strict';
 /* =====================================================================
    Written premium (GGWP / GNWP) dashboard.
-   Reads the most recent CSV of inputs/ggwp-pyramid through the local server (`ggwp.bat`),
-   re-checks every 30 s and refreshes by itself. Without the server a CSV can be loaded by hand.
+   Source: the most recent Underwriting Report (Production) workbook in inputs/ggwp-pyramid, read by the
+   local server (`ggwp.bat`) - expected premium, our share, summed by underwriting year / month / class.
+   The page re-checks the folder every 30 s and refreshes by itself. Without the server a CSV with the
+   same columns can be loaded by hand.
    Gross-gross written premium (GGWP) is before commissions, gross-net (GNWP) after them:
    commission = GGWP - GNWP.
    ===================================================================== */
@@ -17,7 +19,7 @@ const nf = (d) => (NF[d] ||= new Intl.NumberFormat('en-US', { minimumFractionDig
 /* ---------------------------------------------------------------- model */
 const DIMS = {
   uwy: { label: 'Underwriting year', val: (r) => r.y, ordered: true },
-  cls: { label: 'Reserving class', val: (r) => r.cls, byValue: true },
+  cls: { label: 'Class of business', val: (r) => r.cls, byValue: true },
   month: { label: 'UW month', val: (r) => r.m, fmt: (v) => MON[v - 1] || v, ordered: true },
   quarter: { label: 'UW quarter', val: (r) => 'Q' + Math.ceil(r.m / 3), ordered: true },
   period: { label: 'UW year-month', val: (r) => `${r.y}-${pad(r.m)}`, ordered: true },
@@ -82,7 +84,8 @@ function dataNotes(rows) {
 function scale() { return P.units === 'm' ? [1e6, 2] : P.units === 'k' ? [1e3, 1] : [1, 0]; }
 function amt(v) { const [div, d] = scale(), x = Number((v / div).toFixed(d)); return nf(d).format(x === 0 ? 0 : x); }
 const pct = (v) => (v === null || v === undefined ? '–' : (v * 100).toFixed(1) + '%');
-const unitLabel = () => 'Base CCY' + (P.units === 'm' ? ' m' : P.units === 'k' ? ' k' : '');
+const baseUnit = () => (DATA && DATA.unit) || 'Base CCY';
+const unitLabel = () => baseUnit() + (P.units === 'm' ? ' m' : P.units === 'k' ? ' k' : '');
 const natural = (a, b) => (typeof a === 'number' && typeof b === 'number' ? a - b : String(a).localeCompare(String(b), undefined, { numeric: true }));
 const dfmt = (d, v) => (d.fmt ? d.fmt(v) : String(v));
 
@@ -217,10 +220,11 @@ function renderMain() {
   const dimOpts = Object.entries(DIMS).map(([k, d]) => [k, d.label]);
   const cumOk = P.cols !== 'none' && DIMS[P.cols].ordered;
   const notes = DATA.notes;
-  const mode = DATA.source === 'manual' ? 'loaded by hand' : 'latest file in inputs/ggwp-pyramid';
+  const mode = DATA.source === 'manual' ? 'loaded by hand' : 'latest report in inputs/ggwp-pyramid';
   page.innerHTML = `
     <section class="card">
       <div class="meta"><span>File: <b>${esc(DATA.file)}</b> (${mode})</span><span>Modified <b>${esc(DATA.modified || '?')}</b></span><span>${DATA.rows.length.toLocaleString()} rows · ${rows.length.toLocaleString()} in scope</span><span>Amounts in <b>${unitLabel()}</b></span></div>
+      ${DATA.note ? `<div class="muted" style="font-size:12px;margin-top:6px">${esc(DATA.note)}</div>` : ''}
       ${notes.length ? `<details class="map"><summary>${notes.length} data note${notes.length > 1 ? 's' : ''}</summary><ul class="notes-list">${notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></details>` : ''}
     </section>
     <div class="kpis">
@@ -271,12 +275,12 @@ function renderStatus() {
   else el.textContent = '';
   const s = $('#fsmall'); if (s) s.textContent = DATA ? DATA.file : '';
 }
-function renderAll() { if (!DATA) return; renderSidebar(); renderMain(); renderStatus(); $('#layout').classList.toggle('nosb', !P.sidebar); }
+function renderAll() { if (!DATA) return; $('#units').options[0].text = baseUnit(); renderSidebar(); renderMain(); renderStatus(); $('#layout').classList.toggle('nosb', !P.sidebar); }
 
 function setData(text, meta, source) {
   const rows = parseExtract(text);
   const replaced = DATA && DATA.file;
-  DATA = { rows, notes: dataNotes(rows), file: meta.file, modified: meta.modified ? meta.modified.replace('T', ' ') : '', sig: meta.file + '|' + meta.modified + '|' + meta.size, source };
+  DATA = { rows, notes: dataNotes(rows).concat(meta.warnings || []), unit: meta.unit || '', note: meta.note || '', file: meta.file, modified: meta.modified ? meta.modified.replace('T', ' ') : '', sig: meta.file + '|' + meta.modified + '|' + meta.size, source };
   // drop filter values that no longer exist in the new extract
   const have = { uwy: new Set(rows.map((r) => String(r.y))), cls: new Set(rows.map((r) => r.cls)), month: new Set(rows.map((r) => String(r.m))) };
   for (const k of Object.keys(FIL)) FIL[k] = FIL[k].filter((v) => have[k].has(v));
@@ -291,7 +295,7 @@ function toast(msg) {
 function showError(msg) {
   const main = $('#main');
   const box = `<section class="card"><h2>No data</h2><p>${esc(msg)}</p>
-    <p class="muted">Put the CSV extract in <code>inputs/ggwp-pyramid</code> and start the dashboard with <code>ggwp.bat</code> (it always opens the most recent file there), or load a CSV by hand with the button at the top.</p></section>`;
+    <p class="muted">Put the Underwriting Report (Production) workbook in <code>inputs/ggwp-pyramid</code> and start the dashboard with <code>ggwp.bat</code> (it always opens the most recent file there). A CSV with the same columns can also be loaded by hand with the button at the top.</p></section>`;
   if (!DATA) main.innerHTML = box; else toast(msg);
 }
 
@@ -303,7 +307,8 @@ async function check(force) {
     if (!r.ok) { const e = await r.json().catch(() => ({})); renderStatus(); return showError(e.error || 'No extract found.'); }
     const info = await r.json(), sig = info.file + '|' + info.modified + '|' + info.size;
     if (force || !DATA || DATA.source === 'manual' || DATA.sig !== sig) {
-      const full = await (await fetch('/api/ggwp', { cache: 'no-store' })).json();
+      const res = await fetch('/api/ggwp', { cache: 'no-store' }), full = await res.json();
+      if (!res.ok) { renderStatus(); return showError(full.error || 'The extract could not be read.'); }
       setData(full.csv, full, 'server');
     }
     renderStatus();
@@ -322,7 +327,7 @@ function boot() {
       <div class="brand">Written premium<small id="fsmall"></small></div>
       <span class="status-pill" id="stat"></span>
       <span class="spacer"></span>
-      <label class="ctl">Units <select id="units"><option value="">Base CCY</option><option value="k">k</option><option value="m">m</option></select></label>
+      <label class="ctl">Units <select id="units"><option value="">USD</option><option value="k">k</option><option value="m">m</option></select></label>
       <label class="iconbtn" title="Load a CSV extract by hand (no auto-refresh)">Load CSV…<input type="file" id="pick" accept=".csv,text/csv,.txt" hidden></label>
       <button class="iconbtn" id="refresh" title="Check for a newer file now">↻</button>
       <a class="iconbtn navlink" href="explorer.html">Explorer ↗</a>

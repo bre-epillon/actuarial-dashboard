@@ -13,7 +13,7 @@ pivoting of the reserving inputs.
   and postings.
 
 * **`ggwp.html`** - browser tool 3: written premium (GGWP before / GNWP after commissions) from the
-  latest CSV extract in `inputs/ggwp-pyramid`, refreshed automatically (section 4).
+  latest Underwriting Report workbook in `inputs/ggwp-pyramid`, refreshed automatically (section 4).
 
 The tools are static pages (no install, no internet needed); only the GGWP one needs the tiny local
 server started by `ggwp.bat`.
@@ -123,24 +123,27 @@ Open it in Edge or Chrome (it loads `data/explorer_data.js`).
 
 ## 4. Written premium dashboard (`ggwp.html`)
 
-Analyses the database extract of gross-gross written premium (GGWP, before commissions) and
-gross-net written premium (GNWP, after commissions) by underwriting year, underwriting month and
-reserving class.
+Analyses the expected written premium of the **Underwriting Report (Production)** workbook - our share,
+USD - before commissions (GGWP, column BV *Expected GGWP Share*) and after commissions (GNWP, column BY
+*Expected GNWP Share*) by underwriting year, underwriting month and class of business.
 
-* Each morning: save the new CSV extract in **`inputs/ggwp-pyramid/`** (file names like
-  `GGWP view <name>_2026-11-09.csv`; any name works) and double-click **`ggwp.bat`**. The dashboard
-  always shows the **most recent** file of the folder (by the date in its name, then by modification
-  time), re-checks the folder every 30 seconds and refreshes by itself when a newer file or a
-  changed file appears. Leave the black window open while you use it.
-* Columns are found by header name (GGWP, GNWP, underwriting month, underwriting year, reserving class),
-  so column order does not matter. If the extract changes shape, the page says which column is missing.
+* Each time you have a new report: save the workbook (`Underwriting_Report_Production_<date>.xlsx`) in
+  **`inputs/ggwp-pyramid/`** and double-click **`ggwp.bat`** (first run installs the dependencies). The
+  dashboard always shows the **most recent** workbook of the folder (by the date in its name - `2026-11-12`
+  or `12112026` - then by modification time), re-checks the folder every 30 seconds and refreshes by itself
+  when a newer or changed file appears. Reading a workbook takes about 10 seconds. Leave the black window
+  open while you use it.
+* Mapping: GGWP = *Expected GGWP Share (USD)*, GNWP = *Expected GNWP Share (USD)*, underwriting year =
+  *UWY*, underwriting month = month of the *Inception Date*, class = *Class of Business*. Columns are found
+  by header name, so their position does not matter; if one is missing the page says which.
 * Contents: KPIs (GGWP, GNWP, commissions, commission %), written premium by year / quarter / month,
   a monthly timeline or a year-over-year overlay (seasonality, optionally cumulative), and a pivot
   (rows and columns among year, class, month, quarter, year-month; GGWP, GNWP, commissions,
   commission % or % of total; cumulative across columns; heat map; CSV download).
   Underwriting year x month with GGWP is the premium pyramid. Filters on the left apply to everything.
-* Data notes flag oddities in the extract (class UNKNOWN, GNWP above GGWP, future underwriting years...).
-* Without the server (opening `ggwp.html` directly) use *Load CSV...* to pick a file by hand.
+* Data notes flag oddities (e.g. policies whose inception year differs from their UWY, future underwriting years).
+* Without the server (opening `ggwp.html` directly) use *Load CSV...* to pick a CSV with the same five
+  columns by hand. A legacy GGWP CSV in the folder is only used when there is no workbook.
 * The folder can be changed with `"ggwp_dir"` in `sources.json`. `python serve.py` starts the same
   local server from a terminal (it only listens on your machine and serves the tool pages and
   `data/`, never `inputs/`).
@@ -192,8 +195,8 @@ actdash/model.py    policy, claim and posting tables + reconciliation
 actdash/export.py   CSV outputs and the two data bundles
 actdash/cli.py      commands
 build.bat           one-click build (Windows)
-ggwp.bat            opens the GGWP dashboard on the latest extract (Windows)
-serve.py            local server (stdlib only), latest-file API
+ggwp.bat            opens the GGWP dashboard on the latest Underwriting Report (Windows)
+serve.py            local server, latest-file API (reads the Underwriting Report workbook)
 ggwp.html           browser tool 3: written premium (GGWP / GNWP)
 web/ggwp.js         GGWP dashboard
 reconciliation.html browser tool 1: actuarial vs finance
