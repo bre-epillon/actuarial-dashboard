@@ -12,7 +12,11 @@ pivoting of the reserving inputs.
   see premium booking and claim development over time; pivot over policies, claims
   and postings.
 
-Both are single-folder static pages (no install, no internet needed).
+* **`ggwp.html`** - browser tool 3: written premium (GGWP before / GNWP after commissions) from the
+  latest Underwriting Report workbook in `inputs/ggwp-pyramid`, refreshed automatically (section 4).
+
+The tools are static pages (no install, no internet needed); only the GGWP one needs the tiny local
+server started by `ggwp.bat`.
 
 ## Quick start (Windows, Python 3.10+ installed)
 
@@ -117,7 +121,45 @@ Open it in Edge or Chrome (it loads `data/explorer_data.js`).
   change; the layout is remembered in the browser.
 * **Back / Forward and links**: every step (picking an entity, opening a policy, changing a filter) is a browser history entry, so the browser's Back and Forward buttons, `Alt+Left` and the in-page *Back* button all return to the previous view. The address bar always reflects the current scope (e.g. `explorer.html#f.Reinsured=ACHEEL+SAS`): copy it to share a view, or bookmark it. Short forms `#policy=<ref>`, `#broker=<name>`, `#reinsured=<name>`, `#q=<text>` also work. Both tools behave this way.
 
-## 4. Command line
+## 4. Written premium dashboard (`ggwp.html`)
+
+Analyses the expected written premium of the **Underwriting Report (Production)** workbook - our share,
+USD - before commissions (GGWP, column BV *Expected GGWP Share*) and after commissions (GNWP, column BY
+*Expected GNWP Share*) by underwriting year or P&L (accounting) year, underwriting month and class of business.
+
+* Each time you have a new report: save the workbook (`Underwriting_Report_Production_<date>.xlsx`) in
+  **`inputs/ggwp-pyramid/`** and double-click **`ggwp.bat`** (first run installs the dependencies). The
+  dashboard always shows the **most recent** workbook of the folder (by the date in its name - `2026-11-12`
+  or `12112026` - then by modification time), re-checks the folder every 30 seconds and refreshes by itself
+  when a newer or changed file appears. Reading a workbook takes about 10 seconds. Leave the black window
+  open while you use it.
+* Mapping: GGWP = *Expected GGWP Share (USD)* (column BV), GNWP = *Expected GNWP Share (USD)* (column BY),
+  UWY = *UWY* (column T), P&L year = *Year of Account* (column U), underwriting month = month of the
+  *Inception Date*, class = *Class of Business*. **Cancelled policies** (*Flow Status* = Cancelled, column E)
+  are removed. Columns are found by header name, so their position does not matter; if one is missing the page
+  says which.
+* **Basis** selector (top bar):
+  * *UWY · business written* (default): policies whose UWY equals their year of account, i.e. the business
+    written in a year, without the endorsements of policies written in another year;
+  * *P&L · accounting year*: everything booked in the accounting year (new business, renewals and
+    endorsements), grouped by *Year of Account*;
+  * *UWY · all bookings*: all premium of an underwriting year, whichever accounting year it was booked in.
+
+  A card shows the three side by side per year (UWY written vs P&L, difference = endorsements and bookings of
+  policies written in another year); it ignores the selector. Everything else follows the selector.
+* Contents: KPIs (GGWP, GNWP, commissions, commission %), written premium by year / quarter / month,
+  a monthly timeline or a year-over-year overlay (seasonality, optionally cumulative), and a pivot
+  (rows and columns among year, class, month, quarter, year-month; GGWP, GNWP, commissions,
+  commission % or % of total; cumulative across columns; heat map; CSV download).
+  Underwriting year x month with GGWP is the premium pyramid. Filters on the left apply to everything.
+* Data notes flag oddities (e.g. policies whose inception year differs from their UWY, future underwriting years).
+* Without the server (opening `ggwp.html` directly) use *Load CSV...* to pick a CSV with the same five
+  columns by hand. A legacy GGWP CSV in the folder is only used when there is no workbook.
+* The folder can be changed with `"ggwp_dir"` in `sources.json`. `python serve.py` starts the same
+  local server from a terminal (it only listens on your machine and serves the tool pages and
+  `data/`, never `inputs/`).
+
+## 5. Command line
 
 ```bash
 python recon.py summary                       # the Excel Reconciliation table
@@ -164,6 +206,10 @@ actdash/model.py    policy, claim and posting tables + reconciliation
 actdash/export.py   CSV outputs and the two data bundles
 actdash/cli.py      commands
 build.bat           one-click build (Windows)
+ggwp.bat            opens the GGWP dashboard on the latest Underwriting Report (Windows)
+serve.py            local server, latest-file API (reads the Underwriting Report workbook)
+ggwp.html           browser tool 3: written premium (GGWP / GNWP)
+web/ggwp.js         GGWP dashboard
 reconciliation.html browser tool 1: actuarial vs finance
 explorer.html       browser tool 2: search, charts, pivots
 web/core.js|css     shared code: data decoding, filters, aggregation, grid, pivot
