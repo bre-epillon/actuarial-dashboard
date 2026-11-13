@@ -18,11 +18,11 @@ const nf = (d) => (NF[d] ||= new Intl.NumberFormat('en-US', { minimumFractionDig
 
 /* ---------------------------------------------------------------- model */
 const DIMS = {
-  uwy: { label: 'Underwriting year', val: (r) => r.y, ordered: true },
+  uwy: { get label() { return P.basis === 'pnl' ? 'Accounting year (P&L)' : 'Underwriting year'; }, val: (r) => yr(r), ordered: true },
   cls: { label: 'Class of business', val: (r) => r.cls, byValue: true },
   month: { label: 'UW month', val: (r) => r.m, fmt: (v) => MON[v - 1] || v, ordered: true },
   quarter: { label: 'UW quarter', val: (r) => 'Q' + Math.ceil(r.m / 3), ordered: true },
-  period: { label: 'UW year-month', val: (r) => `${r.y}-${pad(r.m)}`, ordered: true },
+  period: { get label() { return P.basis === 'pnl' ? 'Accounting year-month' : 'UW year-month'; }, val: (r) => `${yr(r)}-${pad(r.m)}`, ordered: true },
 };
 const MEAS = {
   ggwp: { label: 'GGWP (before commissions)', short: 'GGWP', f: (a) => a.ggwp },
@@ -31,8 +31,19 @@ const MEAS = {
   ratio: { label: 'Commission % of GGWP', short: 'Comm. %', pct: true, f: (a) => (a.ggwp ? (a.ggwp - a.gnwp) / a.ggwp : null) },
   share: { label: '% of total GGWP', short: '% of total', pct: true, f: (a, g) => (g.ggwp ? a.ggwp / g.ggwp : null) },
 };
-const P = { units: '', rows: 'uwy', cols: 'month', meas: 'ggwp', cum: false, heat: true, barDim: 'uwy', chart: 'timeline', chartMeas: 'ggwp', chartCum: false, sidebar: true };
+const P = { basis: 'written', units: '', rows: 'uwy', cols: 'month', meas: 'ggwp', cum: false, heat: true, barDim: 'uwy', chart: 'timeline', chartMeas: 'ggwp', chartCum: false, sidebar: true };
 const FIL = { uwy: [], cls: [], month: [] };
+/* Premium basis. Each policy row has an underwriting year (UWY, col T) and a year of account (col U, the P&L year):
+   written = business written in its own year (UWY = year of account); pnl = everything booked in the accounting
+   year, endorsements included; uwyall = all premium of a UWY whatever year it was booked in. */
+const yr = (r) => (P.basis === 'pnl' ? r.a : r.y);
+const inBasis = (r) => P.basis !== 'written' || r.y === r.a;
+const BASIS = {
+  written: { short: 'UWY · business written', text: 'policies whose underwriting year equals their year of account (UWY = column U). Endorsements and other bookings of policies written in another year are left out.' },
+  pnl: { short: 'P&L · accounting year', text: 'everything booked in the accounting year (Year of Account, column U): new business, renewals and endorsements, whatever the underwriting year of the policy.' },
+  uwyall: { short: 'UWY · all bookings', text: 'all premium of each underwriting year, whichever accounting year it was booked in (includes later endorsements).' },
+};
+const base = () => DATA.rows.filter(inBasis);
 let DATA = null, SERVER = null /* true | false | null (unknown) */, checkedAt = null, toastTimer = 0;
 
 function loadPrefs() { try { Object.assign(P, JSON.parse(localStorage.getItem(LS) || '{}')); } catch (e) { /* ignore */ } }
@@ -59,10 +70,11 @@ function parseExtract(text) {
   const all = parseCsv(text, delim), head = (all.shift() || []).map((h) => h.trim().toLowerCase());
   const find = (re) => head.findIndex((h) => re.test(h));
   const ix = { ggwp: find(/ggwp/), gnwp: find(/gnwp/), m: find(/underwriting month|uw month/), y: find(/underwriting year|uw year/), cls: find(/reserving class|class/) };
+  const aIx = find(/year of account/);  // optional: without it the two bases coincide
   const missing = Object.entries(ix).filter(([, v]) => v < 0).map(([k]) => ({ ggwp: 'GGWP', gnwp: 'GNWP', m: 'underwriting month', y: 'underwriting year', cls: 'reserving class' }[k]));
   if (missing.length) throw new Error(`Column(s) not found: ${missing.join(', ')}. The file has: ${head.join(' | ') || '(empty)'}`);
   const num = (v) => { const x = parseFloat(String(v).replace(/\s/g, '')); return Number.isFinite(x) ? x : 0; };
-  return all.map((r) => ({ ggwp: num(r[ix.ggwp]), gnwp: num(r[ix.gnwp]), m: Math.round(num(r[ix.m])), y: Math.round(num(r[ix.y])), cls: (r[ix.cls] || '').trim() || '(blank)' }));
+  return all.map((r) => ({ ggwp: num(r[ix.ggwp]), gnwp: num(r[ix.gnwp]), m: Math.round(num(r[ix.m])), y: Math.round(num(r[ix.y])), a: aIx >= 0 ? Math.round(num(r[aIx])) : Math.round(num(r[ix.y])), cls: (r[ix.cls] || '').trim() || '(blank)' }));
 }
 function dataNotes(rows) {
   const notes = [], sum = (a, f) => a.reduce((s, r) => s + f(r), 0), a0 = (n) => nf(0).format(n);
@@ -75,7 +87,9 @@ function dataNotes(rows) {
   const byY = new Map(); for (const r of rows) byY.set(r.y, (byY.get(r.y) || 0) + Math.abs(r.ggwp) + Math.abs(r.gnwp));
   const zero = [...byY].filter(([, v]) => v < 0.5).map(([y]) => y);
   if (zero.length) notes.push(`Underwriting year(s) with no premium: ${zero.join(', ')}.`);
-  const seen = new Set(); let dup = 0; for (const r of rows) { const k = `${r.y}|${r.m}|${r.cls}`; if (seen.has(k)) dup++; else seen.add(k); }
+  const off = rows.filter((r) => r.y !== r.a);
+  if (off.length) notes.push(`${off.length} summary row(s) have a UWY different from their year of account (GGWP ${a0(sum(off, (r) => r.ggwp))}): endorsements / bookings in another year. Left out by the “UWY · business written” basis, included in “P&L” and “UWY · all bookings”.`);
+  const seen = new Set(); let dup = 0; for (const r of rows) { const k = `${r.y}|${r.a}|${r.m}|${r.cls}`; if (seen.has(k)) dup++; else seen.add(k); }
   if (dup) notes.push(`${dup} duplicated underwriting year / month / class combination(s) (amounts are added up).`);
   return notes;
 }
@@ -90,10 +104,10 @@ const natural = (a, b) => (typeof a === 'number' && typeof b === 'number' ? a - 
 const dfmt = (d, v) => (d.fmt ? d.fmt(v) : String(v));
 
 /* ------------------------------------------------------------ filtering */
-const keep = (r, skip) => (skip === 'uwy' || !FIL.uwy.length || FIL.uwy.includes(String(r.y)))
+const keep = (r, skip) => (skip === 'uwy' || !FIL.uwy.length || FIL.uwy.includes(String(yr(r))))
   && (skip === 'cls' || !FIL.cls.length || FIL.cls.includes(r.cls))
   && (skip === 'month' || !FIL.month.length || FIL.month.includes(String(r.m)));
-const inScope = () => DATA.rows.filter((r) => keep(r));
+const inScope = () => base().filter((r) => keep(r));
 const add = (a, r) => { a.ggwp += r.ggwp; a.gnwp += r.gnwp; };
 const acc = () => ({ ggwp: 0, gnwp: 0 });
 function groupBy(rows, dim) {
@@ -108,10 +122,10 @@ function renderSidebar() {
   const sb = $('#sb');
   let html = `<div class="sbh" style="margin-top:2px">Filters <button id="clearf">Clear all</button></div>`;
   for (const key of ['uwy', 'month', 'cls']) {
-    const d = DIMS[key], m = groupBy(DATA.rows.filter((r) => keep(r, key)), key);
+    const d = DIMS[key], m = groupBy(base().filter((r) => keep(r, key)), key);
     // keep selected values visible even when the other filters hide them
     for (const v of FIL[key]) { const k = key === 'cls' ? v : Number(v); if (!m.has(k)) m.set(k, acc()); }
-    for (const r of DATA.rows) { const k = d.val(r); if (!m.has(k)) m.set(k, acc()); }
+    for (const r of base()) { const k = d.val(r); if (!m.has(k)) m.set(k, acc()); }
     const keys = key === 'cls' ? [...m.keys()].sort((a, b) => m.get(b).ggwp - m.get(a).ggwp) : [...m.keys()].sort(natural);
     html += `<div class="sbh">${esc(d.label)}${FIL[key].length ? ` <button data-clr="${key}">clear (${FIL[key].length})</button>` : ''}</div><div class="facet" style="margin:0 0 6px">`;
     for (const k of keys) {
@@ -203,10 +217,24 @@ function lineSpec(rows) {
   }
   // one line per underwriting year over the 12 underwriting months
   const f = MEAS[P.chartMeas].f, byY = new Map();
-  for (const r of rows) { let a = byY.get(r.y); if (!a) byY.set(r.y, (a = Array.from({ length: 12 }, acc))); if (r.m >= 1 && r.m <= 12) add(a[r.m - 1], r); }
+  for (const r of rows) { let a = byY.get(yr(r)); if (!a) byY.set(yr(r), (a = Array.from({ length: 12 }, acc))); if (r.m >= 1 && r.m <= 12) add(a[r.m - 1], r); }
   const ys = [...byY.keys()].filter((y) => byY.get(y).some((a) => a.ggwp || a.gnwp)).sort((a, b) => a - b).slice(-8);
   return { xs: MON, xTitle: 'Underwriting month', fmt: amt, refs: [], ariaLabel: `${MEAS[P.chartMeas].short} by underwriting month, one line per underwriting year`, empty: 'No premium in scope.',
     series: ys.map((y) => ({ name: String(y), color: `var(--s${(y % 8) + 1})`, vals: cum(byY.get(y).map(f)) })) };
+}
+
+/* UWY vs P&L per year (independent of the basis selector; class and month filters apply). */
+function compareModel() {
+  const ok = (r, y) => (!FIL.uwy.length || FIL.uwy.includes(String(y))) && (!FIL.cls.length || FIL.cls.includes(r.cls)) && (!FIL.month.length || FIL.month.includes(String(r.m)));
+  const W = new Map(), PL = new Map(), ALL = new Map();
+  const bump = (m, y, r) => { let a = m.get(y); if (!a) m.set(y, (a = acc())); add(a, r); };
+  for (const r of DATA.rows) {
+    if (ok(r, r.y)) { bump(ALL, r.y, r); if (r.y === r.a) bump(W, r.y, r); }
+    if (ok(r, r.a)) bump(PL, r.a, r);
+  }
+  const g = (m, y) => (m.get(y) ? m.get(y).ggwp : 0);
+  return [...new Set([...W.keys(), ...PL.keys(), ...ALL.keys()])].sort((a, b) => a - b)
+    .map((y) => ({ y, w: g(W, y), p: g(PL, y), all: g(ALL, y) })).filter((c) => Math.abs(c.w) + Math.abs(c.p) + Math.abs(c.all) > 0.5);
 }
 
 /* ----------------------------------------------------------------- page */
@@ -214,17 +242,20 @@ const sel = (id, opts, v) => `<select id="${id}" class="iconbtn">${opts.map(([k,
 function renderMain() {
   const page = $('#main'); if (!DATA) return;
   const rows = inScope(), tot = acc(); rows.forEach((r) => add(tot, r));
-  const comm = tot.ggwp - tot.gnwp, years = new Set(rows.filter((r) => r.ggwp || r.gnwp).map((r) => r.y));
+  const comm = tot.ggwp - tot.gnwp, years = new Set(rows.filter((r) => r.ggwp || r.gnwp).map(yr));
   const kpi = (l, v, sub) => `<div class="kpi"><div class="kl">${l}</div><div class="kv0">${v}</div><div class="kf">${sub || '&nbsp;'}</div></div>`;
   const pm = pivotModel(rows);
   const dimOpts = Object.entries(DIMS).map(([k, d]) => [k, d.label]);
   const cumOk = P.cols !== 'none' && DIMS[P.cols].ordered;
   const notes = DATA.notes;
+  const excl = DATA.rows.filter((r) => r.y !== r.a).reduce((o, r) => ({ n: o.n + 1, g: o.g + r.ggwp }), { n: 0, g: 0 });
+  const cmp = compareModel(), cmpTot = cmp.reduce((o, c) => ({ w: o.w + c.w, p: o.p + c.p, all: o.all + c.all }), { w: 0, p: 0, all: 0 });
   const mode = DATA.source === 'manual' ? 'loaded by hand' : 'latest report in inputs/ggwp-pyramid';
   page.innerHTML = `
     <section class="card">
       <div class="meta"><span>File: <b>${esc(DATA.file)}</b> (${mode})</span><span>Modified <b>${esc(DATA.modified || '?')}</b></span><span>${DATA.rows.length.toLocaleString()} rows · ${rows.length.toLocaleString()} in scope</span><span>Amounts in <b>${unitLabel()}</b></span></div>
-      ${DATA.note ? `<div class="muted" style="font-size:12px;margin-top:6px">${esc(DATA.note)}</div>` : ''}
+      <div style="font-size:12px;margin-top:6px"><b>${esc(BASIS[P.basis].short)}</b>: ${esc(BASIS[P.basis].text)}${P.basis === 'written' ? ` <span class="muted">Left out: ${excl.n.toLocaleString()} summary rows, GGWP ${amt(excl.g)}.</span>` : ''}</div>
+      ${DATA.note ? `<div class="muted" style="font-size:12px;margin-top:4px">${esc(DATA.note)}</div>` : ''}
       ${notes.length ? `<details class="map"><summary>${notes.length} data note${notes.length > 1 ? 's' : ''}</summary><ul class="notes-list">${notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></details>` : ''}
     </section>
     <div class="kpis">
@@ -232,8 +263,16 @@ function renderMain() {
       ${kpi('GNWP (after commissions)', amt(tot.gnwp))}
       ${kpi('Commissions', amt(comm), 'GGWP − GNWP')}
       ${kpi('Commission % of GGWP', pct(tot.ggwp ? comm / tot.ggwp : null))}
-      ${kpi('Underwriting years', years.size ? `${Math.min(...years)} – ${Math.max(...years)}` : '–', `${years.size} with premium`)}
+      ${kpi(P.basis === 'pnl' ? 'Accounting years' : 'Underwriting years', years.size ? `${Math.min(...years)} – ${Math.max(...years)}` : '–', `${years.size} with premium`)}
     </div>
+    <section class="card">
+      <h2>GGWP: underwriting year vs P&L <span class="muted" style="font-weight:400">${unitLabel()} · class and month filters apply</span></h2>
+      <div class="charts"><div id="chC"></div>
+        <div class="scrollbox"><table class="t"><thead><tr><th>Year</th><th class="n" title="UWY = year of account">UWY · business written</th><th class="n" title="Everything booked in the accounting year">P&L · booked in year</th><th class="n" title="P&L minus business written: endorsements and bookings of policies written in other years">P&L − written</th><th class="n" title="All premium of the UWY, whatever year it was booked">UWY · all bookings</th></tr></thead><tbody>
+        ${cmp.map((c) => `<tr><td>${c.y}</td><td class="n">${amt(c.w)}</td><td class="n">${amt(c.p)}</td><td class="n">${amt(c.p - c.w)}</td><td class="n">${amt(c.all)}</td></tr>`).join('')}
+        </tbody><tfoot><tr><td>Total</td><td class="n">${amt(cmpTot.w)}</td><td class="n">${amt(cmpTot.p)}</td><td class="n">${amt(cmpTot.p - cmpTot.w)}</td><td class="n">${amt(cmpTot.all)}</td></tr></tfoot></table></div></div>
+      <div class="muted" style="font-size:12px;margin-top:6px">P&L − written = endorsements and bookings, in the accounting year, of policies written in another year. This comparison ignores the basis selector.</div>
+    </section>
     <div class="charts">
       <section class="card"><h2>Written premium by ${sel('bardim', ['uwy', 'quarter', 'month'].map((k) => [k, DIMS[k].label]), P.barDim)}<span class="r"><button class="iconbtn" data-tbl="chB">Table</button></span></h2><div id="chB"></div></section>
       <section class="card"><h2>${sel('chart', [['timeline', 'Timeline by underwriting month'], ['overlay', 'Year overlay (seasonality)']], P.chart)}<span class="r">
@@ -256,6 +295,8 @@ function renderMain() {
     host._mode = P['tbl' + key] ? 'table' : 'chart';
     fn(host, key === 'B' ? barSpec(rows) : lineSpec(rows));
   }
+  barChart($('#chC'), { cats: cmp.map((c) => String(c.y)), xTitle: 'Year', fmt: amt, ariaLabel: 'GGWP by year: business written (UWY) versus booked in the accounting year (P&L)', empty: 'No premium in scope.',
+    series: [{ name: 'UWY · business written', color: 'var(--s1)', vals: cmp.map((c) => c.w) }, { name: 'P&L · booked in year', color: 'var(--s2)', vals: cmp.map((c) => c.p) }] });
   page.querySelectorAll('[data-tbl]').forEach((b) => {
     const h = $('#' + b.dataset.tbl), key = b.dataset.tbl.slice(2);
     if (h._mode === 'table') b.textContent = 'Chart';
@@ -282,7 +323,7 @@ function setData(text, meta, source) {
   const replaced = DATA && DATA.file;
   DATA = { rows, notes: dataNotes(rows).concat(meta.warnings || []), unit: meta.unit || '', note: meta.note || '', file: meta.file, modified: meta.modified ? meta.modified.replace('T', ' ') : '', sig: meta.file + '|' + meta.modified + '|' + meta.size, source };
   // drop filter values that no longer exist in the new extract
-  const have = { uwy: new Set(rows.map((r) => String(r.y))), cls: new Set(rows.map((r) => r.cls)), month: new Set(rows.map((r) => String(r.m))) };
+  const have = { uwy: new Set(rows.flatMap((r) => [String(r.y), String(r.a)])), cls: new Set(rows.map((r) => r.cls)), month: new Set(rows.map((r) => String(r.m))) };
   for (const k of Object.keys(FIL)) FIL[k] = FIL[k].filter((v) => have[k].has(v));
   renderAll();
   if (replaced && replaced !== meta.file) toast(`New extract loaded: ${meta.file}`);
@@ -327,6 +368,7 @@ function boot() {
       <div class="brand">Written premium<small id="fsmall"></small></div>
       <span class="status-pill" id="stat"></span>
       <span class="spacer"></span>
+      <label class="ctl" title="Which premium the dashboard shows: business written per underwriting year, everything booked per accounting (P&L) year, or all bookings per underwriting year">Basis <select id="basis">${Object.entries(BASIS).map(([k, b]) => `<option value="${k}">${b.short}</option>`).join('')}</select></label>
       <label class="ctl">Units <select id="units"><option value="">USD</option><option value="k">k</option><option value="m">m</option></select></label>
       <label class="iconbtn" title="Load a CSV extract by hand (no auto-refresh)">Load CSV…<input type="file" id="pick" accept=".csv,text/csv,.txt" hidden></label>
       <button class="iconbtn" id="refresh" title="Check for a newer file now">↻</button>
@@ -334,6 +376,8 @@ function boot() {
     </header>
     <div class="layout" id="layout"><aside id="sb"></aside><main id="main" class="page scroll"><div class="empty">Loading the latest extract…</div></main></div>`;
   $('#units').value = P.units;
+  $('#basis').value = P.basis;
+  $('#basis').onchange = (e) => { P.basis = e.target.value; savePrefs(); renderAll(); };
   $('#units').onchange = (e) => { P.units = e.target.value; savePrefs(); renderAll(); };
   $('#tsb').onclick = () => { P.sidebar = !P.sidebar; savePrefs(); $('#layout').classList.toggle('nosb', !P.sidebar); };
   $('#refresh').onclick = () => { if (DATA && DATA.source === 'manual') DATA.source = 'server'; check(true); };

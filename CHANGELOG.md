@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **GGWP dashboard** (`ggwp.html`, started with `ggwp.bat`): written premium before / after commissions (expected GGWP / GNWP share, USD) by underwriting year, month and class of business, read from the most recent **Underwriting Report (Production)** workbook in `inputs/ggwp-pyramid`; refreshes by itself when a newer file appears.
+- GGWP dashboard: cancelled policies (Flow Status) are removed; a **Basis** selector shows GGWP per underwriting year (business written: UWY = year of account), per P&L / accounting year (Year of Account, endorsements included) or per underwriting year with all bookings, plus a UWY vs P&L comparison per year.
 - `serve.py`: small local server used by the GGWP dashboard (reads the workbook with openpyxl, no other dependency).
 - **Navigation**: browser Back / Forward now step through the views you visited (scope, policy, filters); the address bar holds the current scope, so a view can be bookmarked or shared; a *Back to previous view* button on the Overview. A bare `explorer.html` always opens on the whole portfolio.
 

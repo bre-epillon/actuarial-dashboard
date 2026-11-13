@@ -65,8 +65,10 @@ COLS = {
     "ggwp": "Expected GGWP Share (USD)",  # column BV
     "gnwp": "Expected GNWP Share (USD)",  # column BY
     "uwy": "UWY",
+    "yoa": "Year of Account",  # column U: accounting (P&L) year
     "inc": "Inception Date",
     "cls": "Class of Business",
+    "flow": "Flow Status",  # column E: cancelled policies are left out
 }
 _cache: dict = {}
 
@@ -106,15 +108,20 @@ def read_uw_report(path: Path) -> dict:
         raise ValueError("no sheet has the columns: " + ", ".join(COLS.values()))
     ix = {k: head.index(v) for k, v in COLS.items()}
     agg: dict = {}
-    n = skipped = mismatch_n = 0
-    mismatch = 0.0
+    n = skipped = cancelled_n = 0
+    cancelled = 0.0
     for row in ws.iter_rows(min_row=start, values_only=True):
         if not row or row[ix["uwy"]] is None:
             continue
         n += 1
+        if str(row[ix["flow"]] or "").strip().lower().startswith("cancel"):
+            cancelled_n += 1
+            cancelled += float(row[ix["ggwp"]] or 0)
+            continue
         my = _month_year(row[ix["inc"]])
         try:
             uwy = int(row[ix["uwy"]])
+            yoa = int(row[ix["yoa"]])
         except (TypeError, ValueError):
             skipped += 1
             continue
@@ -124,33 +131,28 @@ def read_uw_report(path: Path) -> dict:
         g = float(row[ix["ggwp"]] or 0)
         gn = float(row[ix["gnwp"]] or 0)
         cls = str(row[ix["cls"]]).strip() if row[ix["cls"]] is not None else "(blank)"
-        a = agg.setdefault((uwy, my[1], cls), [0.0, 0.0])
+        a = agg.setdefault((uwy, yoa, my[1], cls), [0.0, 0.0])
         a[0] += g
         a[1] += gn
-        if my[0] != uwy:
-            mismatch_n += 1
-            mismatch += g
     out = io.StringIO()
     w = csv.writer(out, quoting=csv.QUOTE_ALL)
-    w.writerow([COLS["ggwp"], COLS["gnwp"], "Policy Underwriting Month", "Policy Underwriting Year", COLS["cls"]])
-    for (uwy, m, cls), (g, gn) in sorted(agg.items()):
-        w.writerow([f"{g:.2f}", f"{gn:.2f}", m, uwy, cls])
+    w.writerow([COLS["ggwp"], COLS["gnwp"], "Policy Underwriting Month", "Policy Underwriting Year", COLS["yoa"], COLS["cls"]])
+    for (uwy, yoa, m, cls), (g, gn) in sorted(agg.items()):
+        w.writerow([f"{g:.2f}", f"{gn:.2f}", m, uwy, yoa, cls])
     warnings = []
+    if cancelled_n:
+        warnings.append(f"{cancelled_n} cancelled policy row(s) (Flow Status = Cancelled) were removed (expected GGWP {cancelled:,.0f}).")
     if skipped:
-        warnings.append(f"{skipped} policy row(s) without a usable UWY or inception date were left out.")
-    if mismatch_n:
-        warnings.append(
-            f"{mismatch_n} policy row(s) have an inception year different from their UWY "
-            f"(expected GGWP {mismatch:,.0f}): they are shown under their UWY, in their inception month."
-        )
+        warnings.append(f"{skipped} policy row(s) without a usable UWY, year of account or inception date were left out.")
     res = {
         "csv": out.getvalue(),
         "unit": "USD",
-        "policy_rows": n,
+        "policy_rows": n - cancelled_n,
         "warnings": warnings,
         "note": (
-            "Expected premium, our share (USD): GGWP = Expected GGWP Share (column BV), GNWP = Expected GNWP Share "
-            "(column BY). Underwriting year = UWY, underwriting month = month of the inception date, class = Class of Business."
+            "Expected premium, our share (USD), cancelled policies removed: GGWP = Expected GGWP Share (column BV), GNWP = "
+            "Expected GNWP Share (column BY). UWY = underwriting year (column T), P&L year = Year of Account (column U), "
+            "underwriting month = month of the inception date, class = Class of Business."
         ),
     }
     _cache.clear()

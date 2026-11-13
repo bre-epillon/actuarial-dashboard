@@ -125,7 +125,7 @@ Open it in Edge or Chrome (it loads `data/explorer_data.js`).
 
 Analyses the expected written premium of the **Underwriting Report (Production)** workbook - our share,
 USD - before commissions (GGWP, column BV *Expected GGWP Share*) and after commissions (GNWP, column BY
-*Expected GNWP Share*) by underwriting year, underwriting month and class of business.
+*Expected GNWP Share*) by underwriting year or P&L (accounting) year, underwriting month and class of business.
 
 * Each time you have a new report: save the workbook (`Underwriting_Report_Production_<date>.xlsx`) in
   **`inputs/ggwp-pyramid/`** and double-click **`ggwp.bat`** (first run installs the dependencies). The
@@ -133,9 +133,20 @@ USD - before commissions (GGWP, column BV *Expected GGWP Share*) and after commi
   or `12112026` - then by modification time), re-checks the folder every 30 seconds and refreshes by itself
   when a newer or changed file appears. Reading a workbook takes about 10 seconds. Leave the black window
   open while you use it.
-* Mapping: GGWP = *Expected GGWP Share (USD)*, GNWP = *Expected GNWP Share (USD)*, underwriting year =
-  *UWY*, underwriting month = month of the *Inception Date*, class = *Class of Business*. Columns are found
-  by header name, so their position does not matter; if one is missing the page says which.
+* Mapping: GGWP = *Expected GGWP Share (USD)* (column BV), GNWP = *Expected GNWP Share (USD)* (column BY),
+  UWY = *UWY* (column T), P&L year = *Year of Account* (column U), underwriting month = month of the
+  *Inception Date*, class = *Class of Business*. **Cancelled policies** (*Flow Status* = Cancelled, column E)
+  are removed. Columns are found by header name, so their position does not matter; if one is missing the page
+  says which.
+* **Basis** selector (top bar):
+  * *UWY · business written* (default): policies whose UWY equals their year of account, i.e. the business
+    written in a year, without the endorsements of policies written in another year;
+  * *P&L · accounting year*: everything booked in the accounting year (new business, renewals and
+    endorsements), grouped by *Year of Account*;
+  * *UWY · all bookings*: all premium of an underwriting year, whichever accounting year it was booked in.
+
+  A card shows the three side by side per year (UWY written vs P&L, difference = endorsements and bookings of
+  policies written in another year); it ignores the selector. Everything else follows the selector.
 * Contents: KPIs (GGWP, GNWP, commissions, commission %), written premium by year / quarter / month,
   a monthly timeline or a year-over-year overlay (seasonality, optionally cumulative), and a pivot
   (rows and columns among year, class, month, quarter, year-month; GGWP, GNWP, commissions,
